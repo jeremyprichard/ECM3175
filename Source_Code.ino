@@ -19,6 +19,7 @@ int16_t input[5]; // iBUS channels
 # define M4 3 // Motor 4
 const uint8_t motor[] = {3, 5, 6, 9}; // Motor pins
 uint8_t output[4]; // Motor outputs
+double rate[] = {200.0, 200.0, 400.0}; // Maximum rate in each axis
 
 // MPU-6050 register addresses
 # define MPU_6050 0x68 // MPU-6050 address
@@ -41,8 +42,8 @@ unsigned long gyro_Prev_Time = 0; // MPU-6050 sampling time
 uint16_t pd_Frequency = 1000; // PD loop frequency
 double pd_Elapsed_Time; // PD loop interval
 unsigned long pd_Prev_Time = 0; // PD loop time
-double Kp[] = {5.7, 5.7, 0.0}; // Proportional gains
-double Kd[] = {0.12, 0.12, 0.0}; // Derivative gains
+double Kp[] = {0.75, 0.75, 0.84}; // Proportional gains
+double Kd[] = {0.05, 0.05, 0.0}; // Derivative gains
 double error[3]; // Errors
 double prev_Error[3]; // Previous errors
 double p[3]; // Proportional terms
@@ -111,48 +112,51 @@ void loop() {
   }
 }
 
-// Function to receive commands from radio transmitter
+// Receive function
 void receive() {
+  
   // Map 1000-2000 command from each channel to maximum angular velocity of ±800 deg/s
-  input[ROLL] = map(IBus.readChannel(0), 1000, 2000, -800, 800);
-  input[PITCH] = map(IBus.readChannel(1), 1000, 2000, 800, -800);
-  input[YAW] = map(IBus.readChannel(3), 1000, 2000, -800, 800);
+  input[ROLL] = map(IBus.readChannel(0), 1000, 2000, -rate[ROLL],rate[ROLL]);
+  input[PITCH] = map(IBus.readChannel(1), 1000, 2000, rate[PITCH], -rate[PITCH]);
+  input[YAW] = map(IBus.readChannel(3), 1000, 2000, rate[YAW], -rate[YAW]);
 
   // Map 1000-2000 command from throttle channel to 80% of PWM range
   input[THROTTLE] = map(IBus.readChannel(2), 1000, 2000, 0, 204);
 
-  // 
+  // Position of arm switch
   input[ARM] = IBus.readChannel(4);
 }
 
-// Function to measure the angular velocity in each axis
+// Gyroscope function
 void gyro_Read() {
-  gyro_Elapsed_Time = (micros() - gyro_Prev_Time) / 1000000.0; // Calculate MPU-6050 sampling interval
+  
+  gyro_Elapsed_Time = (micros() - gyro_Prev_Time) / 1000000.0; // Calculate elapsed time
   if (gyro_Elapsed_Time >= (1.0 / gyro_Frequency)) { // Obtain another measurement if the sampling period has elapsed
 
     // Measure MPU-6050 temperature
-    Wire.beginTransmission(MPU_6050);
-    Wire.write(TEMP_OUT);
+    Wire.beginTransmission(MPU_6050); // MPU-6050 address
+    Wire.write(TEMP_OUT); // Temperature register
     Wire.endTransmission(false);
-    Wire.requestFrom(MPU_6050, 2, true);
-    gyro_Temp = Wire.read() << 8 | Wire.read();
-    gyro_Temp = (gyro_Temp / 340.0) + 36.53;
+    Wire.requestFrom(MPU_6050, 2, true); // Request data
+    gyro_Temp = Wire.read() << 8 | Wire.read(); // Obtain raw measurment
+    gyro_Temp = (gyro_Temp / 340.0) + 36.53; // Equation to calculate actual temperature from raw measurement
 
     // Measure angular velocity in each axis
-    Wire.beginTransmission(MPU_6050);        
-    Wire.write(GYRO_OUT);                     
+    Wire.beginTransmission(MPU_6050); // MPU-6050 address        
+    Wire.write(GYRO_OUT); // Gyroscope register                    
     Wire.endTransmission(false);
-    Wire.requestFrom(MPU_6050, 6, true); 
-    for (uint8_t n = 0; n <= 2; n++) {
-      gyro_Raw[n] = Wire.read() << 8 | Wire.read();
-      gyro_Raw[n] = (gyro_Raw[n] / gyro_Sensitivity) - offset(n, gyro_Temp); // Use Equation X.X to calculate accurate measurement
+    Wire.requestFrom(MPU_6050, 6, true); // Request data
+    for (uint8_t n = 0; n <= 2; n++) { // For each axis
+      gyro_Raw[n] = Wire.read() << 8 | Wire.read(); // Obtain raw gyroscope measurement
+      gyro_Raw[n] = (gyro_Raw[n] / gyro_Sensitivity) - offset(n, gyro_Temp); // Equation to calculate accurate measurement from raw measurement
     }
     gyro_Prev_Time = micros(); // Store current time
   }
 }
 
-// Function to calculate temperature bias of each axis
+// Temperature bias function
 double offset(uint8_t axis, double temperature) {
+  
   if (axis == PITCH) {
     return (-0.0007 * temperature) - 1.0825;
   } else if (axis == ROLL) {
@@ -162,25 +166,27 @@ double offset(uint8_t axis, double temperature) {
   }
 }
 
+// PD function
 void PD() {
-
+  
   pd_Elapsed_Time = (micros() - pd_Prev_Time) / 1000000.0; // Calculate elapsed time
-  if (pd_Elapsed_Time >= (1.0 / pd_Frequency)) { // Calculate output of PD controller if loop period has elapsed
-    for (uint8_t n = 0; n <= 2; n++) {
-      error[n] = gyro_Raw[n] - input[n];
-      p[n] = Kp[n] * error[n];
-      d[n] = Kd[n] * ((error[n] - prev_Error[n]) / pd_Elapsed_Time);
-      pd[n] = p[n] + d[n];
+  if (pd_Elapsed_Time >= (1.0 / pd_Frequency)) { // Calculate new output of PD controller if loop period has elapsed
+    
+    for (uint8_t n = 0; n <= 2; n++) { // For each axis
+      error[n] = gyro_Raw[n] - input[n]; // Calculate error
+      p[n] = Kp[n] * error[n]; // Calculate proportional term
+      d[n] = Kd[n] * ((error[n] - prev_Error[n]) / pd_Elapsed_Time); / Calculate derivative term
+      pd[n] = p[n] + d[n]; // Sum proportional and derivative terms
       pd[n] = constrain(pd[n], -51, 51); // Constrain output of PD controller to 20% of PWM range
-      prev_Error[n] = error[n];
+      prev_Error[n] = error[n]; // Store current error
     }
 
     // Apply mixing matrix M to output of PD controller and constrain to PWM range
-    output[M1] = constrain(input[THROTTLE] + pd[PITCH] + pd[ROLL] + pd[YAW], 0, 255);
-    output[M2] = constrain(input[THROTTLE] - pd[PITCH] + pd[ROLL] - pd[YAW], 0, 255);
-    output[M3] = constrain(input[THROTTLE] + pd[PITCH] - pd[ROLL] - pd[YAW], 0, 255);
-    output[M4] = constrain(input[THROTTLE] - pd[PITCH] - pd[ROLL] + pd[YAW], 0, 255);
-
+    output[M1] = constrain(input[THROTTLE] + pd[PITCH] + pd[ROLL] - pd[YAW], 0, 255);
+    output[M2] = constrain(input[THROTTLE] - pd[PITCH] + pd[ROLL] + pd[YAW], 0, 255);
+    output[M3] = constrain(input[THROTTLE] + pd[PITCH] - pd[ROLL] + pd[YAW], 0, 255);
+    output[M4] = constrain(input[THROTTLE] - pd[PITCH] - pd[ROLL] - pd[YAW], 0, 255);
+    
     pd_Prev_Time = micros(); // Store current time
   }
 }
