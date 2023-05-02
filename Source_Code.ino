@@ -175,7 +175,7 @@ void PD() {
     for (uint8_t n = 0; n <= 2; n++) { // For each axis
       error[n] = gyro_Raw[n] - input[n]; // Calculate error
       p[n] = Kp[n] * error[n]; // Calculate proportional term
-      d[n] = Kd[n] * ((error[n] - prev_Error[n]) / pd_Elapsed_Time); / Calculate derivative term
+      d[n] = Kd[n] * ((error[n] - prev_Error[n]) / pd_Elapsed_Time); // Calculate derivative term
       pd[n] = p[n] + d[n]; // Sum proportional and derivative terms
       pd[n] = constrain(pd[n], -51, 51); // Constrain output of PD controller to 20% of PWM range
       prev_Error[n] = error[n]; // Store current error
