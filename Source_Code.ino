@@ -22,7 +22,7 @@ uint8_t output[4]; // Motor outputs
 double rate[] = {200.0, 200.0, 400.0}; // Maximum rate in each axis
 
 // MPU-6050 register addresses
-# define MPU_6050 0x68 // MPU-6050 address
+# define MPU_6050 0b1101000 // MPU-6050 address
 # define PWR_MGMT_1 0x6B // Power management register
 # define SIGNAL_PATH_RESET 0x68 // Signal path reset register
 # define CONFIG 0x1A // Configuration register
